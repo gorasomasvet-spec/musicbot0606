@@ -1,4 +1,1 @@
-aiogram==3.*
-asyncpg
-yt-dlp
-python-dotenv
+aiogram==3.28.0
