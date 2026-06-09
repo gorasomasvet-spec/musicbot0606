@@ -4,7 +4,7 @@ from telebot import types
 from sclib import SoundcloudAPI
 import database as db
 
-API_TOKEN = 'ХХХХХХ:ХХХХХХХХХХХХ' # <-- Вставь сюда свой токен бота
+API_TOKEN = os.getenv("BOT_TOKEN")
 bot = telebot.TeleBot(API_TOKEN)
 
 # Инициализируем БД
