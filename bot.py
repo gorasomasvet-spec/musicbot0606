@@ -4,11 +4,7 @@ from telebot import types
 import yt_dlp
 import database as db
 
-# Получаем токен из переменных окружения Railway
 API_TOKEN = os.environ.get('BOT_TOKEN')
-
-# Если тестируешь локально, можешь временно раскомментировать строку ниже:
-# API_TOKEN = 'СЮДА_ТОКЕН'
 
 if not API_TOKEN:
     print("Ошибка: Укажи BOT_TOKEN в переменных Railway.")
@@ -17,10 +13,8 @@ if not API_TOKEN:
 bot = telebot.TeleBot(API_TOKEN)
 db.init_db()
 
-# Временный кэш: file_id -> Название трека
 songs_cache = {}
 
-# Список популярных исполнителей СНГ
 POPULAR_CIS_TRACKS = [
     "Miyagi & Эндшпиль",
     "Macan",
@@ -78,7 +72,6 @@ def handle_menu(message):
             
         bot.send_message(message.chat.id, "📂 Открываю ваш плейлист...")
         
-        # Моментальная отправка по file_id БЕЗ ПОВТОРНОГО СКАЧИВАНИЯ
         for track in playlist:
             track_id, title, file_id = track
             
@@ -91,7 +84,6 @@ def handle_menu(message):
             except Exception:
                 bot.send_message(message.chat.id, f"Не удалось загрузить трек: {title}")
 
-# Скоростная функция поиска через yt-dlp
 def search_and_send_song(message, query_text=None):
     query = query_text if query_text else message.text
     
@@ -102,7 +94,7 @@ def search_and_send_song(message, query_text=None):
     status_msg = bot.send_message(message.chat.id, "🚀 Ищу трек на максимальной скорости...")
     db.add_to_history(message.from_user.id, query)
 
-    # Ультра-скоростные настройки поиска: ищем только аудио, берем 1-й результат
+    # Защищенные настройки от блокировок YouTube (HTTP 403)
     ydl_opts = {
         'format': 'bestaudio/best',
         'default_search': 'ytsearch1',
@@ -110,6 +102,17 @@ def search_and_send_song(message, query_text=None):
         'noplaylist': True,
         'quiet': True,
         'no_warnings': True,
+        # Имитируем запрос встроенного плеера для обхода блокировок серверов хостинга
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['web_embedded', 'web'],
+            }
+        },
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': '*/*',
+            'Referer': 'https://www.youtube.com/',
+        },
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
@@ -131,19 +134,14 @@ def search_and_send_song(message, query_text=None):
         if os.path.exists(filename):
             bot.delete_message(message.chat.id, status_msg.message_id)
             
-            # Кнопка ПЛЮС
             inline_kb = types.InlineKeyboardMarkup()
             btn_add = types.InlineKeyboardButton("➕ Добавить в плейлист", callback_data="add_to_pl")
             inline_kb.add(btn_add)
             
-            # Отправка MP3 в Телеграм
             with open(filename, 'rb') as audio:
                 sent_audio = bot.send_audio(message.chat.id, audio, caption=title, reply_markup=inline_kb)
             
-            # Кэшируем file_id
             songs_cache[sent_audio.audio.file_id] = title
-            
-            # Очищаем диск на Railway
             os.remove(filename)
         else:
             bot.edit_message_text("❌ Ошибка при обработке аудио.", message.chat.id, status_msg.message_id)
@@ -151,18 +149,15 @@ def search_and_send_song(message, query_text=None):
     except Exception as e:
         print(f"Ошибка поиска: {e}")
         bot.delete_message(message.chat.id, status_msg.message_id)
-        bot.send_message(message.chat.id, "❌ Не удалось найти или скачать этот трек.")
+        bot.send_message(message.chat.id, "❌ Не удалось найти или скачать этот трек. Попробуйте ввести точнее.")
 
-# Обработка инлайн-кнопок
 @bot.callback_query_handler(func=lambda call: True)
 def callback_listener(call):
-    # Поиск из раздела Популярное
     if call.data.startswith("search_pop:"):
         artist_name = call.data.split(":")[1]
         bot.answer_callback_query(call.id, f"Поиск: {artist_name}")
         search_and_send_song(call.message, query_text=artist_name)
         
-    # Кнопка Плюс (Добавить в плейлист)
     elif call.data == "add_to_pl":
         file_id = call.message.audio.file_id
         title = songs_cache.get(file_id, call.message.caption or "Любимый трек")
@@ -170,7 +165,6 @@ def callback_listener(call):
         db.add_to_playlist(call.from_user.id, title, file_id)
         bot.answer_callback_query(call.id, "✅ Добавлено в Мой плейлист!")
         
-    # Кнопка Три точки в плейлисте
     elif call.data.startswith("dots_"):
         track_id = call.data.split("_")[1]
         
@@ -181,7 +175,6 @@ def callback_listener(call):
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=inline_kb)
         bot.answer_callback_query(call.id)
         
-    # Кнопка "Убрать песню"
     elif call.data.startswith("delete_"):
         track_id = call.data.split("_")[1]
         db.remove_from_playlist(track_id)
